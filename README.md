@@ -1,6 +1,6 @@
 # AutomateDashboardUpdates
 This is a simple Python script that downloads an ART report from ServicePoint, uploads to Google Drive, and then requests a data refresh from Tableau.  This script assumes you have a scheduled ART Report with a unique name and that your Tableau Dashboard is set to use Google Sheets as its data source.  For my purposes I have setup a report to run after our nightly rebuild with a unique name and have this script scheduled to run early in the morning for a regular update to my Tableau dashboard.  This script also incorporates a RegEx of the report name.  This insures that the wrong file is not uploaded to Google Drive which would break the Tableau dashboard.
- 
+
 **DO NOT INCLUDE ANY PII in your ART report or in Tableau Public**!
 
 ## Prerequisites
