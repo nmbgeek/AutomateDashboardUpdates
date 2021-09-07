@@ -1,7 +1,7 @@
 #!python3
 
 #  Import packages
-import time, os, re, configparser
+import time, os, re, configparser, sys
 from selenium import webdriver
 from pydrive2.auth import GoogleAuth
 from selenium.common.exceptions import NoSuchElementException   
@@ -23,6 +23,7 @@ artFileRegEx = config['Google Drive']['fileRegEx']
 options = webdriver.ChromeOptions()
 options.add_argument("start-maximized")
 options.add_experimental_option('excludeSwitches', ['enable-logging'])
+driver = webdriver.Chrome(options=options)
 
 #Uncomment this to enable using the default or a custom chrome profile otherwise Selenium will launch a new temporary profile instance.
 #AppDataProfile = str(Path.home()) + "\\AppData\\Local\\Google\\Chrome\\User Data\\ #You can create a custom chrome profile to store credentials in and update its path here.  Note that if Chrome profile instance is already opened Chrome Selenium driver will fail.  May move this to the config file eventually.
@@ -101,9 +102,7 @@ def loginTableau():
         tLoginButton.click()
         time.sleep(3)  
 
-#Try/Except will run script.  If there is an error it will be printed and Selenium web driver will be exited.
-try:
-    driver = webdriver.Chrome(options=options)
+def main():
     driver.get(servicePointURL)
 
     # Maximium wait time to find elements in seconds (ServicePoint can be slowwww)
@@ -119,8 +118,8 @@ try:
     passwordInput.send_keys(spPassword)
     loginButton.click()
 
-    # Wait for page to load.  Could not get "Connect to ART" button to be found and click properly
-    time.sleep(8)
+    # Wait for page to load.  Could not get "Connect to ART" button to be found and click properly.  Must wait for pop-up to clear before continuing.
+    time.sleep(20)
 
     # Redirect to ART Reports
     artURL = servicePointURL + '/com.bowmansystems.sp5.core.ServicePoint/index.html#reportsART'
@@ -131,10 +130,26 @@ try:
     artInbox.click()
     time.sleep(2)
 
-    # View last report information
-    lastReport = driver.find_element_by_xpath('//*[@id="applicationContentPanel"]/tbody/tr/td/table/tbody/tr[3]/td/table/tbody/tr/td/table/tbody/tr[2]/td/table/tbody/tr[3]/td/table/tbody/tr[2]/td/table/tbody/tr/td/table/tbody/tr[2]/td[2]/table/tbody/tr[1]/td[2]/img')
-    lastReport.click()
-    time.sleep(2)
+    #Search for most report matching correct name.
+    reports = driver.find_elements_by_css_selector('#applicationContentPanel > tbody > tr > td > table > tbody > tr:nth-child(3) > td > table > tbody > tr > td > table > tbody > tr:nth-child(2) > td > table > tbody > tr:nth-child(3) > td > table > tbody > tr:nth-child(2) > td > table > tbody > tr > td > table > tbody > tr:nth-child(2) > td.bdr-b.bdr-gray > table > tbody > tr > td.bdr-b.bdr-gray.sp5-Font-Std')
+    for rnum, report in enumerate(reports):
+        print('Report '+ str(rnum+1) +' is: ' + report.text)
+        view = ''
+        if bool(re.match(artFileRegEx, report.text)):
+            print('Match found!')
+            view = '//*[@id="applicationContentPanel"]/tbody/tr/td/table/tbody/tr[3]/td/table/tbody/tr/td/table/tbody/tr[2]/td/table/tbody/tr[3]/td/table/tbody/tr[2]/td/table/tbody/tr/td/table/tbody/tr[2]/td[2]/table/tbody/tr['+str(rnum+1)+']/td[2]'
+            driver.find_element_by_xpath(view).click()
+            break
+
+    if not view:
+        print('No matching report found!  Exiting.')
+        driver.quit()
+        sys.exit()
+
+    # # View last report information
+    # lastReport = driver.find_element_by_xpath('//*[@id="applicationContentPanel"]/tbody/tr/td/table/tbody/tr[3]/td/table/tbody/tr/td/table/tbody/tr[2]/td/table/tbody/tr[3]/td/table/tbody/tr[2]/td/table/tbody/tr/td/table/tbody/tr[2]/td[2]/table/tbody/tr[1]/td[2]/img')
+    # lastReport.click()
+    # time.sleep(2)
 
     # Download last report
     downloadButton = driver.find_element_by_xpath('/html/body/div[5]/div/table/tbody/tr[2]/td[2]/table/tbody/tr[3]/td/table/tbody/tr/td/table/tbody/tr[2]/td/table/tbody/tr/td[1]/div/div')
@@ -156,7 +171,7 @@ try:
         print('Find name does not match the regex:' + artFileRegEx)
         print('Quitting!')
         driver.quit()
-        quit()
+        sys.exit()
 
     # Update Dashboard File
     upload_file_to_drive(driveDashboardID, fullDownloadPath)
@@ -192,6 +207,9 @@ try:
     #Close Chrome
     driver.quit()
 
+#Try/Except will run script.  If there is an error it will be printed and Selenium web driver will be exited.
+try:
+    main()
 except Exception as e:
     #Print error and exit Selenium Chrome
     print('A problem has occurred from the Problematic code: ', e)
