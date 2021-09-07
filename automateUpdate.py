@@ -20,15 +20,17 @@ driveDashboardID = config['Google Drive']['fileID']
 dashboardURL = config['Tableau']['dashboardURL']
 artFileRegEx = config['Google Drive']['fileRegEx']
 
+#Set Selenium options
 options = webdriver.ChromeOptions()
 options.add_argument("start-maximized")
 options.add_experimental_option('excludeSwitches', ['enable-logging'])
-driver = webdriver.Chrome(options=options)
-
 #Uncomment this to enable using the default or a custom chrome profile otherwise Selenium will launch a new temporary profile instance.
 #AppDataProfile = str(Path.home()) + "\\AppData\\Local\\Google\\Chrome\\User Data\\ #You can create a custom chrome profile to store credentials in and update its path here.  Note that if Chrome profile instance is already opened Chrome Selenium driver will fail.  May move this to the config file eventually.
 #DefaultProfile = "--user-data-dir=" + AppDataProfile
-#options.add_argument(DefaultProfile) 
+#options.add_argument(DefaultProfile)
+driver = webdriver.Chrome(options=options)
+
+x
 
 # Authenticate with Google Drive API
 gauth = GoogleAuth(settings_file='gAuthSettings.yaml')
