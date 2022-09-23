@@ -8,8 +8,8 @@ This is a simple Python script that downloads an ART report from ServicePoint, u
 (Make sure to add to PATH and restart computer.)
 
 2. **Choose Firefox or Chrome:**  Firefox seems more reliable.  You will need to edit and uncomment the main Py file to switch to chrome.
-	*[Firefox Driver](https://github.com/mozilla/geckodriver/releases)** from https://github.com/mozilla/geckodriver/releases. Extract geckodriver.exe to the folder where Python was installed.
-	*[Chrome Driver](https://chromedriver.chromium.org/downloads)** from https://chromedriver.chromium.org/downloads. Extract chromedriver.exe to the folder where Python was installed.
+	* [Firefox Driver](https://github.com/mozilla/geckodriver/releases) from https://github.com/mozilla/geckodriver/releases. Extract geckodriver.exe to the folder where Python was installed.
+	* [Chrome Driver](https://chromedriver.chromium.org/downloads) from https://chromedriver.chromium.org/downloads. Extract chromedriver.exe to the folder where Python was installed.
 	
 3. **Python Dependencies:** Quick install - After adding Python to PATH and restarting computer open command prompt and run:	````pip install selenium pydrive2````
 	* [Selenium](https://github.com/baijum/selenium-python)
