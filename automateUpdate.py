@@ -1,7 +1,7 @@
 #!python3
 
 #  Import packages
-import time, os, re, configparser, sys
+import time, os, re, configparser, sys, logging, glob
 from selenium import webdriver
 from pydrive2.auth import GoogleAuth
 from selenium.common.exceptions import NoSuchElementException   
@@ -18,19 +18,37 @@ tableauUsername = config['Tableau']['email']
 tableauPassword = config['Tableau']['password']
 driveDashboardID = config['Google Drive']['fileID']
 dashboardURL = config['Tableau']['dashboardURL']
-artFileRegEx = config['Google Drive']['fileRegEx']
+artFileRegEx = config['Google Drive']['artFileRegEx']
+file = config['Google Drive']['downloadRegEx']
 
-#Set Selenium options
-options = webdriver.ChromeOptions()
-options.add_argument("start-maximized")
-options.add_experimental_option('excludeSwitches', ['enable-logging'])
+downloads_path = str(Path.home() / "Downloads")
+#make tableau always ask to sign in
+signIn = dashboardURL + '?authMode=signIn'
+#options = webdriver.ChromeOptions()
+#options.add_argument("start-maximized")
+#options.add_experimental_option('excludeSwitches', ['enable-logging'])
 #Uncomment this to enable using the default or a custom chrome profile otherwise Selenium will launch a new temporary profile instance.
 #AppDataProfile = str(Path.home()) + "\\AppData\\Local\\Google\\Chrome\\User Data\\ #You can create a custom chrome profile to store credentials in and update its path here.  Note that if Chrome profile instance is already opened Chrome Selenium driver will fail.  May move this to the config file eventually.
 #DefaultProfile = "--user-data-dir=" + AppDataProfile
-#options.add_argument(DefaultProfile)
-driver = webdriver.Chrome(options=options)
+#options.add_argument(DefaultProfile) 
+#Use Firefox 
+#You can specify a profile with below command
+#profile = webdriver.FirefoxProfile("C:\\Users\\admin\\AppData\\Roaming\\Mozilla\\Firefox\\Profiles\\08fk25r3.default")
+driver = webdriver.Firefox()#add profile in parens
 
-x
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s]: %(message)s",
+    handlers=[
+        logging.FileHandler("dashboardupdate.log"),
+        logging.StreamHandler()
+    ]
+)
+logging.getLogger()
+logging.info('STARTING')
+
+
+
 
 # Authenticate with Google Drive API
 gauth = GoogleAuth(settings_file='gAuthSettings.yaml')
@@ -39,8 +57,8 @@ gauth = GoogleAuth(settings_file='gAuthSettings.yaml')
 gauth.LoadCredentialsFile()
 if gauth.credentials is None:
     auth_url = gauth.GetAuthUrl() # Create authentication url user needs to visit
-    print ('Please visit ' + auth_url)
-    print ('Enter verification code:')
+    logging.info ('Please visit ' + auth_url)
+    logging.info ('Enter verification code:')
     code = input()
     gauth.Auth(code) # Authorize and build service from the code
     gauth.SaveCredentialsFile()
@@ -60,12 +78,25 @@ def check_exists_by_xpath(xpath):
         return False
     return True
 
+def checkAlerts():
+    try:
+        alert = driver.switch_to.alert
+        alert.accept()
+    except:
+        pass
+
 def upload_file_to_drive(file_id, local_path):
     """Overwrites the existing Google drive file."""
     update_file = drive.CreateFile({'id': file_id})
     update_file.SetContentFile(local_path)
     update_file.Upload()
-    print('Uploaded File Name: %s, mimeType: %s' % (update_file['title'], update_file['mimeType']))
+    logging.info('Uploaded File Name: %s, mimeType: %s' % (update_file['title'], update_file['mimeType']))
+
+def get_latest_file(name):
+    filedir = downloads_path + '\\' + name
+    list_of_files = glob.iglob(filedir) 
+    latest_file = max(list_of_files, key=os.path.getctime)
+    return latest_file
 
 def getDownLoadedFileName(waitTime):
     driver.execute_script("window.open()")
@@ -83,26 +114,30 @@ def getDownLoadedFileName(waitTime):
             # check if downloadPercentage is 100 (otherwise the script will keep waiting)
             if downloadPercentage == 100:
                 # return the file name once the download is completed
-                return driver.execute_script("return document.querySelector('downloads-manager').shadowRoot.querySelector('#downloadsList downloads-item').shadowRoot.querySelector('div#content  #file-link').text")
+                filename = driver.execute_script("return document.querySelector('downloads-manager').shadowRoot.querySelector('#downloadsList downloads-item').shadowRoot.querySelector('div#content  #file-link').text")
+                fullDownloadPath = os.path.join(downloads_path, filename)
+                return fullDownloadPath
         except:
             pass
         time.sleep(1)
         if time.time() > endTime:
-            break
+            return get_latest_file(file)
 
 def loginTableau():
-    if check_exists_by_xpath('//*[@id="root"]/div/header/div/div[2]/div/a[8]/button'):
-        signInButton = driver.find_element_by_xpath('//*[@id="root"]/div/header/div/div[2]/div/a[8]/button')
-        signInButton.click()
+    driver.get(signIn)
+    # Login if not logged in
+    #if len(driver.find_elements_by_xpath('//*[@id="root"]/div/header/div/div[2]/div/a[8]/button')) > 0:
+        #signInButton = driver.find_element_by_xpath('//*[@id="root"]/div/header/div/div[2]/div/a[8]/button')
+        #signInButton.click()
         # Find login fields
-        tUsernameInput = driver.find_element_by_css_selector('#email')
-        tPasswordInput = driver.find_element_by_css_selector('#password')
-        tLoginButton = driver.find_element_by_xpath('/html/body/div[4]/div/div/div/div/form/div[4]/button')
-        # Send credentials and login
-        tUsernameInput.send_keys(tableauUsername)
-        tPasswordInput.send_keys(tableauPassword)
-        tLoginButton.click()
-        time.sleep(3)  
+    tUsernameInput = driver.find_element_by_css_selector('#email')
+    tPasswordInput = driver.find_element_by_css_selector('#password')
+    tLoginButton = driver.find_element_by_xpath('/html/body/div[4]/div/div/div/div/form/div[4]/button')
+    # Send credentials and login
+    tUsernameInput.send_keys(tableauUsername)
+    tPasswordInput.send_keys(tableauPassword)
+    tLoginButton.click()
+    time.sleep(3)  
 
 def main():
     driver.get(servicePointURL)
@@ -121,64 +156,101 @@ def main():
     loginButton.click()
 
     # Wait for page to load.  Could not get "Connect to ART" button to be found and click properly.  Must wait for pop-up to clear before continuing.
-    time.sleep(20)
-
-    # Redirect to ART Reports
-    artURL = servicePointURL + '/com.bowmansystems.sp5.core.ServicePoint/index.html#reportsART'
-    driver.get(artURL)
-
-    # Load ART Inbox
-    artInbox = driver.find_element_by_xpath('//*[@id="applicationContentPanel"]/tbody/tr/td/table/tbody/tr[3]/td/table/tbody/tr/td/table/tbody/tr[2]/td/table/tbody/tr[3]/td/table/tbody/tr[2]/td/table/tbody/tr/td/table/tbody/tr[1]/td[1]/div/div[2]/img')
-    artInbox.click()
+    time.sleep(10)
+    #driver.find_element_by_id('navigation-link.reports').click()
     time.sleep(2)
-
-    #Search for most report matching correct name.
-    reports = driver.find_elements_by_css_selector('#applicationContentPanel > tbody > tr > td > table > tbody > tr:nth-child(3) > td > table > tbody > tr > td > table > tbody > tr:nth-child(2) > td > table > tbody > tr:nth-child(3) > td > table > tbody > tr:nth-child(2) > td > table > tbody > tr > td > table > tbody > tr:nth-child(2) > td.bdr-b.bdr-gray > table > tbody > tr > td.bdr-b.bdr-gray.sp5-Font-Std')
+    #driver.find_element_by_id('gwt-uid-333').click()
+    driver.find_element_by_xpath('//*[@id="ServicePointMain"]/tbody/tr[2]/td/div/div/table/tbody/tr/td[3]/table/tbody/tr/td[2]/table/tbody/tr[4]/td/table/tbody/tr/td/div/a/img').click()
+    time.sleep(3)
+    driver.switch_to.window(driver.window_handles[-1])
+    logging.info(driver.title)
+    time.sleep(5)
+    iframe = driver.find_element_by_id('launchpadFrame')
+    driver.switch_to.frame(iframe)
+    time.sleep(8)
+    subframe = driver.find_element_by_xpath("//iframe[@name='servletBridgeIframe']")
+    driver.switch_to.frame(subframe)
+    time.sleep(8)
+    logging.info('Trying to click Inbox...')
+    driver.find_element_by_id('Inbox-title-inner').click()
+    time.sleep(8)
+    view = ''
+    reports = driver.find_elements_by_class_name('sapMLIBActionable')
     for rnum, report in enumerate(reports):
-        print('Report '+ str(rnum+1) +' is: ' + report.text)
+        logging.info('Report '+ str(rnum+1) +' is: ' + report.text)
         view = ''
         if bool(re.match(artFileRegEx, report.text)):
-            print('Match found!')
-            view = '//*[@id="applicationContentPanel"]/tbody/tr/td/table/tbody/tr[3]/td/table/tbody/tr/td/table/tbody/tr[2]/td/table/tbody/tr[3]/td/table/tbody/tr[2]/td/table/tbody/tr/td/table/tbody/tr[2]/td[2]/table/tbody/tr['+str(rnum+1)+']/td[2]'
+            logging.info('Match found!')
+            view = '/html/body/div[2]/div[2]/div/div[2]/div/section/div/div/div/div/section/div/div/section[1]/div/section/div/div/div/div/div/div/ul/li['+str(rnum+1)+']/div/div/div[1]'
             driver.find_element_by_xpath(view).click()
+            time.sleep(3)
+            driver.find_element_by_xpath('/html/body/div[2]/div[2]/div/div[2]/div/section/div/div/div/div/section/div/div/section[2]/div/section/div/div/section/div[1]/div[2]/div/button[1]/span/span/bdi').click()
             break
-
     if not view:
-        print('No matching report found!  Exiting.')
+        logging.warning('No matching report found!  Exiting.')
         driver.quit()
         sys.exit()
+    # # Redirect to ART Reports
+    # #artURL = servicePointURL + '/com.bowmansystems.sp5.core.ServicePoint/index.html#reportsART'
+    # #driver.get(artURL)
 
-    # # View last report information
-    # lastReport = driver.find_element_by_xpath('//*[@id="applicationContentPanel"]/tbody/tr/td/table/tbody/tr[3]/td/table/tbody/tr/td/table/tbody/tr[2]/td/table/tbody/tr[3]/td/table/tbody/tr[2]/td/table/tbody/tr/td/table/tbody/tr[2]/td[2]/table/tbody/tr[1]/td[2]/img')
-    # lastReport.click()
+    # # Load ART Inbox
+    # artInbox = driver.find_element_by_xpath('//*[@id="applicationContentPanel"]/tbody/tr/td/table/tbody/tr[3]/td/table/tbody/tr/td/table/tbody/tr[2]/td/table/tbody/tr[3]/td/table/tbody/tr[2]/td/table/tbody/tr/td/table/tbody/tr[1]/td[1]/div/div[2]/img')
+    # artInbox.click()
     # time.sleep(2)
 
-    # Download last report
-    downloadButton = driver.find_element_by_xpath('/html/body/div[5]/div/table/tbody/tr[2]/td[2]/table/tbody/tr[3]/td/table/tbody/tr/td/table/tbody/tr[2]/td/table/tbody/tr/td[1]/div/div')
-    downloadButton.click()
+    # #Search for most report matching correct name.
+    # reports = driver.find_elements_by_css_selector('#applicationContentPanel > tbody > tr > td > table > tbody > tr:nth-child(3) > td > table > tbody > tr > td > table > tbody > tr:nth-child(2) > td > table > tbody > tr:nth-child(3) > td > table > tbody > tr:nth-child(2) > td > table > tbody > tr > td > table > tbody > tr:nth-child(2) > td.bdr-b.bdr-gray > table > tbody > tr > td.bdr-b.bdr-gray.sp5-Font-Std')
+    # for rnum, report in enumerate(reports):
+    #     logging.info('Report '+ str(rnum+1) +' is: ' + report.text)
+    #     view = ''
+    #     if bool(re.match(artFileRegEx, report.text)):
+    #         logging.info('Match found!')
+    #         view = '//*[@id="applicationContentPanel"]/tbody/tr/td/table/tbody/tr[3]/td/table/tbody/tr/td/table/tbody/tr[2]/td/table/tbody/tr[3]/td/table/tbody/tr[2]/td/table/tbody/tr/td/table/tbody/tr[2]/td[2]/table/tbody/tr['+str(rnum+1)+']/td[2]'
+    #         driver.find_element_by_xpath(view).click()
+    #         time.sleep(.5)
+    #         break
+    # if not view:
+    #     logging.warning('No matching report found!  Exiting.')
+    #     driver.quit()
+    #     sys.exit()
 
+    # # # View last report information
+    # # lastReport = driver.find_element_by_xpath('//*[@id="applicationContentPanel"]/tbody/tr/td/table/tbody/tr[3]/td/table/tbody/tr/td/table/tbody/tr[2]/td/table/tbody/tr[3]/td/table/tbody/tr[2]/td/table/tbody/tr/td/table/tbody/tr[2]/td[2]/table/tbody/tr[1]/td[2]/img')
+    # # lastReport.click()
+    # # time.sleep(2)
+
+    # # Download last report
+    # time.sleep(2)
+    # downloadButton = driver.find_element_by_xpath('/html/body/div[5]/div/table/tbody/tr[2]/td[2]/table/tbody/tr[3]/td/table/tbody/tr/td/table/tbody/tr[2]/td/table/tbody/tr/td[1]/div/div')
+    # downloadButton.click()
+    # time.sleep(20)
+
+    time.sleep(10)
     # Call method to get downloaded file name and store download path
-    DownloadedFileName = getDownLoadedFileName(60)
-    downloads_path = str(Path.home() / "Downloads")
-    fullDownloadPath = os.path.join(downloads_path, DownloadedFileName)
-    print(fullDownloadPath + " has completed downloading.")
-    driver.switch_to.window(driver.window_handles[0])
+    downloadedFileName = get_latest_file(file)
+    filename = os.path.basename(downloadedFileName)
+    logging.info(filename + " has completed downloading.")
+    #driver.switch_to.window(driver.window_handles[0]) #from chrome method
 
     # Logout of ServicePoint
+    checkAlerts()
+    driver.switch_to.window(driver.window_handles[0])
     logOut = driver.find_element_by_xpath('//*[@id="navigation-link.logout"]')
     logOut.click()
 
     # Check that file downloaded is the correct one for dashboard
-    if bool(re.match(artFileRegEx, DownloadedFileName)) == False:
-        print('Find name does not match the regex:' + artFileRegEx)
+    if bool(re.match(artFileRegEx, filename)) == False:
+        logging.warning('Find name does not match the regex:' + artFileRegEx)
         print('Quitting!')
         driver.quit()
         sys.exit()
 
     # Update Dashboard File
-    upload_file_to_drive(driveDashboardID, fullDownloadPath)
-
+    upload_file_to_drive(driveDashboardID, downloadedFileName)
+    
     #Go to Tableauu
+    checkAlerts()
     driver.get(dashboardURL)
 
     #Reduce implicit wait time because Tableau is much quicker.
@@ -195,14 +267,16 @@ def main():
     # Find and click Refresh Button.  Attempts 3 times.
     i = 3
     while i > 0:
+        if not check_exists_by_xpath('//*[@id="root"]/div/header/div/div[2]/div/div/img'):
+            loginTableau()
         if check_exists_by_xpath('//*[@id="root"]/div/div[2]/div[3]/div[2]/div[2]/div[2]/button'):
             tRefreshButton = driver.find_element_by_xpath('//*[@id="root"]/div/div[2]/div[3]/div[2]/div[2]/div[2]/button')
             tRefreshButton.click()
-            print('Tableau data refresh requested')
+            logging.info('Tableau data refresh requested')
             i = 0
         else:
             i -= 1
-            print('No Tableau data refresh button found.  Has it been recently refreshed?  Trying ' + str(i) + ' more times.')
+            logging.info('No Tableau data refresh button found.  Has it been recently refreshed?  Trying ' + str(i) + ' more times.')
             driver.refresh()
             time.sleep(5)
 
@@ -212,7 +286,8 @@ def main():
 #Try/Except will run script.  If there is an error it will be printed and Selenium web driver will be exited.
 try:
     main()
+    logging.info('COMPLETED')
 except Exception as e:
-    #Print error and exit Selenium Chrome
-    print('A problem has occurred from the Problematic code: ', e)
+    logging.critical(e, exc_info=True)
     driver.quit()
+
