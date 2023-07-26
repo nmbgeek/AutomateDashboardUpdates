@@ -1,41 +1,15 @@
 #!python3
 
 #  Import packages
-import time, os, re, configparser, sys, logging, glob
+import time, os, re, configparser, sys, logging
 from selenium import webdriver
 from pydrive2.auth import GoogleAuth
 from selenium.common.exceptions import NoSuchElementException   
+from selenium.webdriver.common.keys import Keys
 from pydrive2.drive import GoogleDrive
 from pathlib import Path
 
-# Define variables (read from script.conf)
-config = configparser.ConfigParser()
-config.read('script.conf')
-servicePointURL = config['ServicePoint']['URL']
-spUsername = config['ServicePoint']['username']
-spPassword = config['ServicePoint']['password']
-tableauUsername = config['Tableau']['email']
-tableauPassword = config['Tableau']['password']
-driveDashboardID = config['Google Drive']['fileID']
-dashboardURL = config['Tableau']['dashboardURL']
-artFileRegEx = config['Google Drive']['artFileRegEx']
-file = config['Google Drive']['downloadRegEx']
-
-downloads_path = str(Path.home() / "Downloads")
-#make tableau always ask to sign in
-signIn = dashboardURL + '?authMode=signIn'
-#options = webdriver.ChromeOptions()
-#options.add_argument("start-maximized")
-#options.add_experimental_option('excludeSwitches', ['enable-logging'])
-#Uncomment this to enable using the default or a custom chrome profile otherwise Selenium will launch a new temporary profile instance.
-#AppDataProfile = str(Path.home()) + "\\AppData\\Local\\Google\\Chrome\\User Data\\ #You can create a custom chrome profile to store credentials in and update its path here.  Note that if Chrome profile instance is already opened Chrome Selenium driver will fail.  May move this to the config file eventually.
-#DefaultProfile = "--user-data-dir=" + AppDataProfile
-#options.add_argument(DefaultProfile) 
-#Use Firefox 
-#You can specify a profile with below command
-#profile = webdriver.FirefoxProfile("C:\\Users\\admin\\AppData\\Roaming\\Mozilla\\Firefox\\Profiles\\08fk25r3.default")
-driver = webdriver.Firefox()#add profile in parens
-
+#create or update log file
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s]: %(message)s",
@@ -47,9 +21,21 @@ logging.basicConfig(
 logging.getLogger()
 logging.info('STARTING')
 
-
-
-
+# Define variables (read from script.conf)
+config = configparser.ConfigParser()
+config.read('script.conf')
+servicePointURL = config['ServicePoint']['URL']
+spUsername = config['ServicePoint']['username']
+spPassword = config['ServicePoint']['password']
+tableauUsername = config['Tableau']['email']
+tableauPassword = config['Tableau']['password']
+driveDashboardID = config['Google Drive']['fileID']
+dashboardURL = config['Tableau']['dashboardURL']
+artFileRegEx = config['Google Drive']['fileRegEx']
+downloads_path = str(Path.home() / "Downloads")
+signIn = dashboardURL + '?authMode=signIn'
+filename = "" #left blank for Global usage
+driver = webdriver.Firefox()
 # Authenticate with Google Drive API
 gauth = GoogleAuth(settings_file='gAuthSettings.yaml')
 
@@ -93,58 +79,30 @@ def upload_file_to_drive(file_id, local_path):
     logging.info('Uploaded File Name: %s, mimeType: %s' % (update_file['title'], update_file['mimeType']))
 
 def get_latest_file(name):
-    filedir = downloads_path + '\\' + name
-    list_of_files = glob.iglob(filedir) 
+    list_of_files = [f for f in os.listdir(downloads_path) if re.search(artFileRegEx, f)]
+    list_of_files = [f'{downloads_path}\\{i}' for i in list_of_files]
     latest_file = max(list_of_files, key=os.path.getctime)
     return latest_file
 
-def getDownLoadedFileName(waitTime):
-    driver.execute_script("window.open()")
-    # switch to new tab
-    driver.switch_to.window(driver.window_handles[-1])
-    # navigate to chrome downloads
-    driver.get('chrome://downloads')
-    # define the endTime
-    endTime = time.time()+waitTime
-    while True:
-        try:
-            # get downloaded percentage
-            downloadPercentage = driver.execute_script(
-                "return document.querySelector('downloads-manager').shadowRoot.querySelector('#downloadsList downloads-item').shadowRoot.querySelector('#progress').value")
-            # check if downloadPercentage is 100 (otherwise the script will keep waiting)
-            if downloadPercentage == 100:
-                # return the file name once the download is completed
-                filename = driver.execute_script("return document.querySelector('downloads-manager').shadowRoot.querySelector('#downloadsList downloads-item').shadowRoot.querySelector('div#content  #file-link').text")
-                fullDownloadPath = os.path.join(downloads_path, filename)
-                return fullDownloadPath
-        except:
-            pass
-        time.sleep(1)
-        if time.time() > endTime:
-            return get_latest_file(file)
-
 def loginTableau():
     driver.get(signIn)
-    # Login if not logged in
-    #if len(driver.find_elements_by_xpath('//*[@id="root"]/div/header/div/div[2]/div/a[8]/button')) > 0:
-        #signInButton = driver.find_element_by_xpath('//*[@id="root"]/div/header/div/div[2]/div/a[8]/button')
-        #signInButton.click()
-        # Find login fields
-    tUsernameInput = driver.find_element_by_css_selector('#email')
-    tPasswordInput = driver.find_element_by_css_selector('#password')
-    tLoginButton = driver.find_element_by_xpath('/html/body/div[4]/div/div/div/div/form/div[4]/button')
-    # Send credentials and login
-    tUsernameInput.send_keys(tableauUsername)
-    tPasswordInput.send_keys(tableauPassword)
-    tLoginButton.click()
-    time.sleep(3)  
+    time.sleep(2)
+    if check_exists_by_xpath('//*[@id="email"]'):
+        tUsernameInput = driver.find_element_by_css_selector('#email')
+        tPasswordInput = driver.find_element_by_css_selector('#password')
+        tUsernameInput.send_keys(tableauUsername)
+        tPasswordInput.send_keys(tableauPassword)
+        tPasswordInput.send_keys(Keys.ENTER)
+    time.sleep(5)  
+    driver.get(dashboardURL)
+    #Reduce implicit wait time because Tableau is much quicker than SP.
+    driver.implicitly_wait(5)
 
-def main():
+def sp5Login():
     driver.get(servicePointURL)
-
+    logging.info("Attempting Login")
     # Maximium wait time to find elements in seconds (ServicePoint can be slowwww)
     driver.implicitly_wait(60)
-
     # Find login fields
     usernameInput = driver.find_element_by_xpath('//*[@id="formfield-login"]')
     passwordInput = driver.find_element_by_xpath('//*[@id="formfield-password"]')
@@ -154,14 +112,13 @@ def main():
     usernameInput.send_keys(spUsername)
     passwordInput.send_keys(spPassword)
     loginButton.click()
-
-    # Wait for page to load.  Could not get "Connect to ART" button to be found and click properly.  Must wait for pop-up to clear before continuing.
+    
+def artDownload():
     time.sleep(10)
-    #driver.find_element_by_id('navigation-link.reports').click()
-    time.sleep(2)
-    #driver.find_element_by_id('gwt-uid-333').click()
+    #Click login
     driver.find_element_by_xpath('//*[@id="ServicePointMain"]/tbody/tr[2]/td/div/div/table/tbody/tr/td[3]/table/tbody/tr/td[2]/table/tbody/tr[4]/td/table/tbody/tr/td/div/a/img').click()
     time.sleep(3)
+    logging.info("Switch to business objects tab and wait to load")
     driver.switch_to.window(driver.window_handles[-1])
     logging.info(driver.title)
     time.sleep(5)
@@ -190,104 +147,59 @@ def main():
         logging.warning('No matching report found!  Exiting.')
         driver.quit()
         sys.exit()
-    # # Redirect to ART Reports
-    # #artURL = servicePointURL + '/com.bowmansystems.sp5.core.ServicePoint/index.html#reportsART'
-    # #driver.get(artURL)
-
-    # # Load ART Inbox
-    # artInbox = driver.find_element_by_xpath('//*[@id="applicationContentPanel"]/tbody/tr/td/table/tbody/tr[3]/td/table/tbody/tr/td/table/tbody/tr[2]/td/table/tbody/tr[3]/td/table/tbody/tr[2]/td/table/tbody/tr/td/table/tbody/tr[1]/td[1]/div/div[2]/img')
-    # artInbox.click()
-    # time.sleep(2)
-
-    # #Search for most report matching correct name.
-    # reports = driver.find_elements_by_css_selector('#applicationContentPanel > tbody > tr > td > table > tbody > tr:nth-child(3) > td > table > tbody > tr > td > table > tbody > tr:nth-child(2) > td > table > tbody > tr:nth-child(3) > td > table > tbody > tr:nth-child(2) > td > table > tbody > tr > td > table > tbody > tr:nth-child(2) > td.bdr-b.bdr-gray > table > tbody > tr > td.bdr-b.bdr-gray.sp5-Font-Std')
-    # for rnum, report in enumerate(reports):
-    #     logging.info('Report '+ str(rnum+1) +' is: ' + report.text)
-    #     view = ''
-    #     if bool(re.match(artFileRegEx, report.text)):
-    #         logging.info('Match found!')
-    #         view = '//*[@id="applicationContentPanel"]/tbody/tr/td/table/tbody/tr[3]/td/table/tbody/tr/td/table/tbody/tr[2]/td/table/tbody/tr[3]/td/table/tbody/tr[2]/td/table/tbody/tr/td/table/tbody/tr[2]/td[2]/table/tbody/tr['+str(rnum+1)+']/td[2]'
-    #         driver.find_element_by_xpath(view).click()
-    #         time.sleep(.5)
-    #         break
-    # if not view:
-    #     logging.warning('No matching report found!  Exiting.')
-    #     driver.quit()
-    #     sys.exit()
-
-    # # # View last report information
-    # # lastReport = driver.find_element_by_xpath('//*[@id="applicationContentPanel"]/tbody/tr/td/table/tbody/tr[3]/td/table/tbody/tr/td/table/tbody/tr[2]/td/table/tbody/tr[3]/td/table/tbody/tr[2]/td/table/tbody/tr/td/table/tbody/tr[2]/td[2]/table/tbody/tr[1]/td[2]/img')
-    # # lastReport.click()
-    # # time.sleep(2)
-
-    # # Download last report
-    # time.sleep(2)
-    # downloadButton = driver.find_element_by_xpath('/html/body/div[5]/div/table/tbody/tr[2]/td[2]/table/tbody/tr[3]/td/table/tbody/tr/td/table/tbody/tr[2]/td/table/tbody/tr/td[1]/div/div')
-    # downloadButton.click()
-    # time.sleep(20)
-
+        
+def getDownload():
     time.sleep(10)
     # Call method to get downloaded file name and store download path
-    downloadedFileName = get_latest_file(file)
+    downloadedFileName = get_latest_file(artFileRegEx)
     filename = os.path.basename(downloadedFileName)
     logging.info(filename + " has completed downloading.")
     #driver.switch_to.window(driver.window_handles[0]) #from chrome method
-
-    # Logout of ServicePoint
-    checkAlerts()
-    driver.switch_to.window(driver.window_handles[0])
-    logOut = driver.find_element_by_xpath('//*[@id="navigation-link.logout"]')
-    logOut.click()
-
+    
     # Check that file downloaded is the correct one for dashboard
     if bool(re.match(artFileRegEx, filename)) == False:
         logging.warning('Find name does not match the regex:' + artFileRegEx)
         print('Quitting!')
         driver.quit()
         sys.exit()
-
-    # Update Dashboard File
     upload_file_to_drive(driveDashboardID, downloadedFileName)
-    
-    #Go to Tableauu
+        
+def logoutSp5():    # Logout of ServicePoint
     checkAlerts()
-    driver.get(dashboardURL)
-
-    #Reduce implicit wait time because Tableau is much quicker.
-    driver.implicitly_wait(5)
-    time.sleep(3)
-
-    #Check if logged in and do so if needed.
-    if not check_exists_by_xpath('//*[@id="root"]/div/header/div/div[2]/div/div/img'):
-        loginTableau()
-
-    #Refresh page to reveal data refresh button
-    time.sleep(3)
-
-    # Find and click Refresh Button.  Attempts 3 times.
-    i = 3
+    driver.switch_to.window(driver.window_handles[0])
+    logOut = driver.find_element_by_xpath('//*[@id="navigation-link.logout"]')
+    logOut.click()
+    checkAlerts()
+    
+def refreshTableau(numTimes):    # Find and click Refresh Button.  numTimes = number of attempts.
+    i = numTimes
     while i > 0:
         if not check_exists_by_xpath('//*[@id="root"]/div/header/div/div[2]/div/div/img'):
             loginTableau()
-        if check_exists_by_xpath('//*[@id="root"]/div/div[2]/div[3]/div[2]/div[2]/div[2]/button'):
-            tRefreshButton = driver.find_element_by_xpath('//*[@id="root"]/div/div[2]/div[3]/div[2]/div[2]/div[2]/button')
+        if check_exists_by_xpath('//button[text()="Request Data Refresh"]'):
+            tRefreshButton = driver.find_element_by_xpath('//button[text()="Request Data Refresh"]')
             tRefreshButton.click()
             logging.info('Tableau data refresh requested')
             i = 0
         else:
             i -= 1
             logging.info('No Tableau data refresh button found.  Has it been recently refreshed?  Trying ' + str(i) + ' more times.')
-            driver.refresh()
+            driver.get(dashboardURL)
             time.sleep(5)
 
-    #Close Chrome
-    driver.quit()
+def main():
+    sp5Login()
+    artDownload()
+    getDownload() #finds download and uploads to google drive
+    logoutSp5()
+    loginTableau()
+    refreshTableau(3)# Find and click Refresh Button.  Attempts 3 times.
+    driver.quit()#Close Browser
 
-#Try/Except will run script.  If there is an error it will be printed and Selenium web driver will be exited.
+#Try/Except will run script.  If there is an error it will be logged and Selenium web driver will be exited.
 try:
     main()
     logging.info('COMPLETED')
 except Exception as e:
     logging.critical(e, exc_info=True)
     driver.quit()
-
