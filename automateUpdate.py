@@ -36,6 +36,15 @@ downloads_path = str(Path.home() / "Downloads")
 signIn = dashboardURL + '?authMode=signIn'
 filename = "" #left blank for Global usage
 driver = webdriver.Firefox()
+#Comment previous line and uncomment below to use chrome driver
+#options = webdriver.ChromeOptions()
+#options.add_argument("start-maximized")
+#options.add_experimental_option('excludeSwitches', ['enable-logging'])
+#Uncomment this to enable using the default or a custom chrome profile otherwise Selenium will launch a new temporary profile instance.
+#AppDataProfile = str(Path.home()) + "\\AppData\\Local\\Google\\Chrome\\User Data\\ #You can create a custom chrome profile to store credentials in and update its path here.  Note that if Chrome profile instance is already opened Chrome Selenium driver will fail.  May move this to the config file eventually.
+#DefaultProfile = "--user-data-dir=" + AppDataProfile
+#options.add_argument(DefaultProfile) 
+
 # Authenticate with Google Drive API
 gauth = GoogleAuth(settings_file='gAuthSettings.yaml')
 
@@ -60,6 +69,13 @@ drive = GoogleDrive(gauth)
 def check_exists_by_xpath(xpath):
     try:
         driver.find_element_by_xpath(xpath)
+    except NoSuchElementException:
+        return False
+    return True
+
+def check_exists_by_class(divclass):
+    try:
+        driver.find_element_by_class_name(divclass)
     except NoSuchElementException:
         return False
     return True
@@ -102,7 +118,7 @@ def sp5Login():
     driver.get(servicePointURL)
     logging.info("Attempting Login")
     # Maximium wait time to find elements in seconds (ServicePoint can be slowwww)
-    driver.implicitly_wait(60)
+    driver.implicitly_wait(5)
     # Find login fields
     usernameInput = driver.find_element_by_xpath('//*[@id="formfield-login"]')
     passwordInput = driver.find_element_by_xpath('//*[@id="formfield-password"]')
@@ -113,10 +129,33 @@ def sp5Login():
     passwordInput.send_keys(spPassword)
     loginButton.click()
     
+    time.sleep(.5)
+    #check if password expired
+    if check_exists_by_xpath("//*[contains(text(), 'Password has expired')]"):
+        logging.info("Password Changed - Updating and Changing It Back")
+        temporaryPassword = spPassword + "!"
+        passwordInput2 = driver.find_element_by_xpath('//*[@id="formfield-password2"]')
+        passwordInput2.send_keys(temporaryPassword)
+        passwordInput.send_keys(temporaryPassword)
+        loginButton2 = driver.find_element_by_xpath('//*[@id="LoginView.fbtn_submit"]/div')
+        loginButton2.click()
+        time.sleep(8)
+        if check_exists_by_class("sp5-authpanel-right"):
+            driver.find_element_by_xpath("/html/body/table[2]/tbody/tr[1]/td/table/tbody/tr/td/table/tbody/tr/td[3]/table/tbody/tr/td/table/tbody/tr[1]/td[3]/span").click()
+            driver.find_element_by_xpath('//*[@id="UserProfilePopup.changePassword-button"]').click()
+            passwordInputs = driver.find_elements_by_class_name("gwt-PasswordTextBox")
+            passwordInputs[0].send_keys(temporaryPassword)
+            passwordInputs[1].send_keys(spPassword)
+            passwordInputs[2].send_keys(spPassword)
+            driver.find_element_by_xpath('//*[@id="UserProfileChangePasswordPopup.save-button"]').click()
+            time.sleep(0.5)
+            driver.find_element_by_xpath('//*[@id="UserProfilePopup.exit-button"]').click()
+    driver.implicitly_wait(30)
+    
 def artDownload():
-    time.sleep(10)
+    time.sleep(5)
     #Click login
-    driver.find_element_by_xpath('//*[@id="ServicePointMain"]/tbody/tr[2]/td/div/div/table/tbody/tr/td[3]/table/tbody/tr/td[2]/table/tbody/tr[4]/td/table/tbody/tr/td/div/a/img').click()
+    driver.find_element_by_xpath('//*[@id="ServicePointMain"]/tbody/tr[2]/td/div/div/table/tbody/tr/td[3]/table/tbody/tr/td/table/tbody/tr[4]/td/table/tbody/tr/td/div/a/span[1]').click()
     time.sleep(3)
     logging.info("Switch to business objects tab and wait to load")
     driver.switch_to.window(driver.window_handles[-1])
