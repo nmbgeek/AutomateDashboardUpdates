@@ -1,15 +1,47 @@
 #!python3
 
 #  Import packages
-import time, os, re, configparser, sys, logging
+import time, os, re, configparser, sys, logging, glob
 from selenium import webdriver
 from pydrive2.auth import GoogleAuth
-from selenium.common.exceptions import NoSuchElementException   
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support.ui import Select
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.common.exceptions import NoSuchElementException, TimeoutException   
 from selenium.webdriver.common.keys import Keys
 from pydrive2.drive import GoogleDrive
 from pathlib import Path
+from webdriver_manager.core.logger import set_logger
 
-#create or update log file
+#Start Firefox
+from selenium import webdriver
+from selenium.webdriver.firefox.service import Service as FirefoxService
+from webdriver_manager.firefox import GeckoDriverManager
+##Optional With Profile Version with path formatted as example:
+#profile = webdriver.FirefoxProfile("C:\\Users\\admin\\AppData\\Roaming\\Mozilla\\Firefox\\Profiles\\08fk25r3.default")
+#driver = webdriver.Firefox(service=FirefoxService(GeckoDriverManager().install()), profile=profile)
+driver = webdriver.Firefox(service=FirefoxService(GeckoDriverManager().install()))
+#End Firefox
+
+##Start Chrome
+#from selenium import webdriver
+#from selenium.webdriver.chrome.service import Service as ChromeService
+#from webdriver_manager.chrome import ChromeDriverManager
+#options = webdriver.ChromeOptions()
+#options.add_argument("start-maximized")
+#options.add_experimental_option('excludeSwitches', ['enable-logging'])
+###Uncomment the below double comments to enable using the default or a custom chrome profile otherwise Selenium will launch a new temporary profile instance.
+##AppDataProfile = str(Path.home()) + "\\AppData\\Local\\Google\\Chrome\\User Data\\ #You can create a custom chrome profile to store credentials in and update its path here.  Note that if Chrome profile instance is already opened Chrome Selenium driver will fail.  May move this to the config file eventually.
+##DefaultProfile = "--user-data-dir=" + AppDataProfile
+##options.add_argument(DefaultProfile) 
+#driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()),options=options)
+##End Chrome
+
+##Other Browser Configs at https://pypi.org/project/webdriver-manager/
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s]: %(message)s",
@@ -18,8 +50,11 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
-logging.getLogger()
+logger = logging.getLogger()
+set_logger(logger)
 logging.info('STARTING')
+
+action = webdriver.ActionChains(driver)
 
 # Define variables (read from script.conf)
 config = configparser.ConfigParser()
@@ -34,51 +69,51 @@ dashboardURL = config['Tableau']['dashboardURL']
 artFileRegEx = config['Google Drive']['fileRegEx']
 downloads_path = str(Path.home() / "Downloads")
 signIn = dashboardURL + '?authMode=signIn'
-filename = "" #left blank for Global usage
-driver = webdriver.Firefox()
-#Comment previous line and uncomment below to use chrome driver
-#options = webdriver.ChromeOptions()
-#options.add_argument("start-maximized")
-#options.add_experimental_option('excludeSwitches', ['enable-logging'])
-#Uncomment this to enable using the default or a custom chrome profile otherwise Selenium will launch a new temporary profile instance.
-#AppDataProfile = str(Path.home()) + "\\AppData\\Local\\Google\\Chrome\\User Data\\ #You can create a custom chrome profile to store credentials in and update its path here.  Note that if Chrome profile instance is already opened Chrome Selenium driver will fail.  May move this to the config file eventually.
-#DefaultProfile = "--user-data-dir=" + AppDataProfile
-#options.add_argument(DefaultProfile) 
 
-# Authenticate with Google Drive API
-gauth = GoogleAuth(settings_file='gAuthSettings.yaml')
+#Define global variables
+filename = ""
+default_timeout = 30
 
 # Try to load saved client credentials
-gauth.LoadCredentialsFile()
-if gauth.credentials is None:
-    auth_url = gauth.GetAuthUrl() # Create authentication url user needs to visit
-    logging.info ('Please visit ' + auth_url)
-    logging.info ('Enter verification code:')
-    code = input()
-    gauth.Auth(code) # Authorize and build service from the code
-    gauth.SaveCredentialsFile()
-elif gauth.access_token_expired:
-    # Refresh them if expired
-    gauth.Refresh()
-else:
-    # Initialize the saved creds
-    gauth.Authorize()
+def googleAuth():
+    # Authenticate with Google Drive API
+    gauth = GoogleAuth(settings_file='gAuthSettings.yaml')
+    gauth.LoadCredentialsFile()
+    if gauth.credentials is None:
+        auth_url = gauth.GetAuthUrl() # Create authentication url user needs to visit
+        logging.info ('Please visit ' + auth_url)
+        logging.info ('Enter verification code:')
+        code = input()
+        gauth.Auth(code) # Authorize and build service from the code
+        gauth.SaveCredentialsFile()
+    elif gauth.access_token_expired:
+        # Refresh them if expired
+        gauth.Refresh()
+    else:
+        # Initialize the saved creds
+        gauth.Authorize()
+    return GoogleDrive(gauth)
 
-drive = GoogleDrive(gauth)
-
-def check_exists_by_xpath(xpath):
+def check_exists(by_strategy, value, timeout=default_timeout):
     try:
-        driver.find_element_by_xpath(xpath)
-    except NoSuchElementException:
+        WebDriverWait(driver, timeout).until(EC.visibility_of_element_located((by_strategy, value)))
+        return True
+    except (NoSuchElementException, TimeoutException):
         return False
-    return True
 
-def check_exists_by_class(divclass):
+def get_element(by_strategy, value, timeout=default_timeout):
     try:
-        driver.find_element_by_class_name(divclass)
-    except NoSuchElementException:
-        return False
-    return True
+        return WebDriverWait(driver, timeout).until(EC.element_to_be_clickable((by_strategy, value)))
+    except:
+        logging.error(f"Unable to find element: {value}")
+        quit()
+        
+def click_element(by_strategy, value, timeout=default_timeout):
+    try:
+        WebDriverWait(driver, timeout).until(EC.element_to_be_clickable((by_strategy, value))).click()
+    except:
+        logging.error(f"Unable to click element: {value}")
+        quit()
 
 def checkAlerts():
     try:
@@ -87,110 +122,125 @@ def checkAlerts():
     except:
         pass
 
-def upload_file_to_drive(file_id, local_path):
+def upload_file_to_drive(drive, file_id, local_path):
     """Overwrites the existing Google drive file."""
     update_file = drive.CreateFile({'id': file_id})
     update_file.SetContentFile(local_path)
     update_file.Upload()
     logging.info('Uploaded File Name: %s, mimeType: %s' % (update_file['title'], update_file['mimeType']))
 
-def get_latest_file(name):
-    list_of_files = [f for f in os.listdir(downloads_path) if re.search(artFileRegEx, f)]
-    list_of_files = [f'{downloads_path}\\{i}' for i in list_of_files]
-    latest_file = max(list_of_files, key=os.path.getctime)
-    return latest_file
-
 def loginTableau():
     driver.get(signIn)
+    # Login if not logged in
     time.sleep(2)
-    if check_exists_by_xpath('//*[@id="email"]'):
-        tUsernameInput = driver.find_element_by_css_selector('#email')
-        tPasswordInput = driver.find_element_by_css_selector('#password')
-        tUsernameInput.send_keys(tableauUsername)
-        tPasswordInput.send_keys(tableauPassword)
-        tPasswordInput.send_keys(Keys.ENTER)
+    if check_exists(By.ID, 'email'):
+        # Send credentials and login
+        get_element(By.ID, 'email').send_keys(tableauUsername)
+        get_element(By.ID, 'password').send_keys(tableauPassword)
+        get_element(By.ID, 'password').send_keys(Keys.ENTER)
     time.sleep(5)  
     driver.get(dashboardURL)
-    #Reduce implicit wait time because Tableau is much quicker than SP.
-    driver.implicitly_wait(5)
 
 def sp5Login():
     driver.get(servicePointURL)
     logging.info("Attempting Login")
-    # Maximium wait time to find elements in seconds (ServicePoint can be slowwww)
-    driver.implicitly_wait(5)
-    # Find login fields
-    usernameInput = driver.find_element_by_xpath('//*[@id="formfield-login"]')
-    passwordInput = driver.find_element_by_xpath('//*[@id="formfield-password"]')
-    loginButton = driver.find_element_by_xpath('//*[@id="LoginView.fbtn_submit"]/div')
 
-    # Send credentials and login
-    usernameInput.send_keys(spUsername)
-    passwordInput.send_keys(spPassword)
-    loginButton.click()
+    # Maximium wait time to find elements in seconds (ServicePoint can be slowwww)
+    driver.implicitly_wait(10)
+
+    # Login to Service Point
+    get_element(By.ID, 'formfield-login').send_keys(spUsername)
+    get_element(By.ID, 'formfield-password').send_keys(spPassword)
+    click_element(By.ID, 'LoginView.fbtn_submit')
     
-    time.sleep(.5)
-    #check if password expired
-    if check_exists_by_xpath("//*[contains(text(), 'Password has expired')]"):
+    #Check if password expired
+    if check_exists(By.XPATH, "//*[contains(text(), 'Password has expired')]"):
         logging.info("Password Changed - Updating and Changing It Back")
         temporaryPassword = spPassword + "!"
-        passwordInput2 = driver.find_element_by_xpath('//*[@id="formfield-password2"]')
+        passwordInput2 = get_element(By.ID, 'formfield-password2')
         passwordInput2.send_keys(temporaryPassword)
-        passwordInput.send_keys(temporaryPassword)
-        loginButton2 = driver.find_element_by_xpath('//*[@id="LoginView.fbtn_submit"]/div')
-        loginButton2.click()
-        time.sleep(8)
-        if check_exists_by_class("sp5-authpanel-right"):
-            driver.find_element_by_xpath("/html/body/table[2]/tbody/tr[1]/td/table/tbody/tr/td/table/tbody/tr/td[3]/table/tbody/tr/td/table/tbody/tr[1]/td[3]/span").click()
-            driver.find_element_by_xpath('//*[@id="UserProfilePopup.changePassword-button"]').click()
-            passwordInputs = driver.find_elements_by_class_name("gwt-PasswordTextBox")
+        get_element(By.ID, 'formfield-password').send_keys(temporaryPassword)
+        click_element(By.ID, 'LoginView.fbtn_submit')
+        click_element(By.XPATH, '//*[@id="LoginView.fbtn_submit"]/div')
+        if check_exists(By.CLASS_NAME, "sp5-authpanel-right"):
+            click_element(By.XPATH, "/html/body/table[2]/tbody/tr[1]/td/table/tbody/tr/td/table/tbody/tr/td[3]/table/tbody/tr/td/table/tbody/tr[1]/td[3]/span")
+            click_element(By.ID, 'UserProfilePopup.changePassword-button')
+            passwordInputs = driver.find_elements(By.CLASS_NAME, "gwt-PasswordTextBox")
             passwordInputs[0].send_keys(temporaryPassword)
             passwordInputs[1].send_keys(spPassword)
             passwordInputs[2].send_keys(spPassword)
-            driver.find_element_by_xpath('//*[@id="UserProfileChangePasswordPopup.save-button"]').click()
-            time.sleep(0.5)
-            driver.find_element_by_xpath('//*[@id="UserProfilePopup.exit-button"]').click()
-    driver.implicitly_wait(30)
+            click_element(By.ID, 'UserProfileChangePasswordPopup.save-button')
+            click_element(By.ID, 'UserProfilePopup.exit-button')
     
 def artDownload():
-    time.sleep(5)
-    #Click login
-    driver.find_element_by_xpath('//*[@id="ServicePointMain"]/tbody/tr[2]/td/div/div/table/tbody/tr/td[3]/table/tbody/tr/td/table/tbody/tr[4]/td/table/tbody/tr/td/div/a/span[1]').click()
-    time.sleep(3)
+    click_element(By.CLASS_NAME, 'query-business-object-icon')
     logging.info("Switch to business objects tab and wait to load")
+    time.sleep(5)
     driver.switch_to.window(driver.window_handles[-1])
     logging.info(driver.title)
-    time.sleep(5)
-    iframe = driver.find_element_by_id('launchpadFrame')
+    iframe = get_element(By.ID, 'launchpadFrame')
     driver.switch_to.frame(iframe)
-    time.sleep(8)
-    subframe = driver.find_element_by_xpath("//iframe[@name='servletBridgeIframe']")
+    subframe = get_element(By.XPATH, "//iframe[@name='servletBridgeIframe']")
     driver.switch_to.frame(subframe)
-    time.sleep(8)
+    logging.info('Remove banner if present')    
+    if(check_exists(By.CLASS_NAME,'help4-footer')):
+        click_element(By.CLASS_NAME, 'help4-close')
     logging.info('Trying to click Inbox...')
-    driver.find_element_by_id('Inbox-title-inner').click()
-    time.sleep(8)
-    view = ''
-    reports = driver.find_elements_by_class_name('sapMLIBActionable')
+    click_element(By.ID, 'Inbox-title-inner')
+
+    check_exists(By.CLASS_NAME, 'sapMLIBActionable')
+    WebDriverWait(driver, 20).until(
+        lambda d: next(
+            (el for el in d.find_elements(By.CLASS_NAME, 'sapMLIBActionable') if re.match(artFileRegEx, el.text)),
+            None
+        )
+    )
+    reports = driver.find_elements(By.CLASS_NAME, 'sapMLIBActionable')
     for rnum, report in enumerate(reports):
         logging.info('Report '+ str(rnum+1) +' is: ' + report.text)
-        view = ''
         if bool(re.match(artFileRegEx, report.text)):
+            title = report.find_element(By.CLASS_NAME, 'sapMSLITitle')
             logging.info('Match found!')
-            view = '/html/body/div[2]/div[2]/div/div[2]/div/section/div/div/div/div/section/div/div/section[1]/div/section/div/div/div/div/div/div/ul/li['+str(rnum+1)+']/div/div/div[1]'
-            driver.find_element_by_xpath(view).click()
-            time.sleep(3)
-            driver.find_element_by_xpath('/html/body/div[2]/div[2]/div/div[2]/div/section/div/div/div/div/section/div/div/section[2]/div/section/div/div/section/div[1]/div[2]/div/button[1]/span/span/bdi').click()
-            break
-    if not view:
-        logging.warning('No matching report found!  Exiting.')
-        driver.quit()
-        sys.exit()
+            click_element(By.XPATH, "//ul[@id='__list3-listUl']/li["+ str(rnum+1) +"]")
+            click_element(By.XPATH, "//button//bdi[text()='View']")
+            filename = re.sub(r':', '-', title.text) + '.xlsx'
+            return filename
+    logging.warning('No matching report found!  Exiting.')
+    driver.quit()
+    sys.exit()
+
+def wait_for_download(filename, timeout=default_timeout):
+    """
+    Waits for a fully downloaded, non-zero-byte file in the download directory.
+
+    Args:
+        filename (str): The expected file name (without suffix like (1)).
+        timeout (int): Maximum wait time in seconds.
+
+    Returns:
+        str: The full path of the downloaded file.
+
+    Raises:
+        TimeoutError: If the file doesn't download within the timeout.
+    """
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        # Check for the main file and any potential duplicates
+        downloaded_files = glob.glob(os.path.join(downloads_path, f"{filename}*"))
         
-def getDownload():
-    time.sleep(10)
+        # Find the first non-zero-byte file
+        for file_path in downloaded_files:
+            if not file_path.endswith(".part") and os.path.getsize(file_path) > 0:
+                return file_path  # Return the correct file path
+        
+        time.sleep(1)  # Wait before checking again
+
+    raise TimeoutError(f"File {filename} was not downloaded within {timeout} seconds.")      
+
+def getDownload(drive, file):
+    logging.info('Waiting on download')
     # Call method to get downloaded file name and store download path
-    downloadedFileName = get_latest_file(artFileRegEx)
+    downloadedFileName = wait_for_download(file)
     filename = os.path.basename(downloadedFileName)
     logging.info(filename + " has completed downloading.")
     #driver.switch_to.window(driver.window_handles[0]) #from chrome method
@@ -201,23 +251,22 @@ def getDownload():
         print('Quitting!')
         driver.quit()
         sys.exit()
-    upload_file_to_drive(driveDashboardID, downloadedFileName)
+    upload_file_to_drive(drive, driveDashboardID, downloadedFileName)
         
-def logoutSp5():    # Logout of ServicePoint
+def logoutSp5():
+    # Logout of ServicePoint
     checkAlerts()
     driver.switch_to.window(driver.window_handles[0])
-    logOut = driver.find_element_by_xpath('//*[@id="navigation-link.logout"]')
-    logOut.click()
+    click_element(By.ID, 'navigation-link.logout')
     checkAlerts()
     
 def refreshTableau(numTimes):    # Find and click Refresh Button.  numTimes = number of attempts.
     i = numTimes
     while i > 0:
-        if not check_exists_by_xpath('//*[@id="root"]/div/header/div/div[2]/div/div/img'):
+        if not check_exists(By.XPATH, '//*[@id="root"]/div/header/div/div[2]/div/div/img'):
             loginTableau()
-        if check_exists_by_xpath('//button[text()="Request Data Refresh"]'):
-            tRefreshButton = driver.find_element_by_xpath('//button[text()="Request Data Refresh"]')
-            tRefreshButton.click()
+        if check_exists(By.XPATH, '//button[text()="Request Data Refresh"]'):
+            click_element(By.XPATH, '//button[text()="Request Data Refresh"]')
             logging.info('Tableau data refresh requested')
             i = 0
         else:
@@ -227,15 +276,17 @@ def refreshTableau(numTimes):    # Find and click Refresh Button.  numTimes = nu
             time.sleep(5)
 
 def main():
+    drive = googleAuth()
     sp5Login()
-    artDownload()
-    getDownload() #finds download and uploads to google drive
+    download = artDownload()
+    getDownload(drive, download) #finds download and uploads to google drive
     logoutSp5()
     loginTableau()
     refreshTableau(3)# Find and click Refresh Button.  Attempts 3 times.
-    driver.quit()#Close Browser
+    #Close Chrome
+    driver.quit()
 
-#Try/Except will run script.  If there is an error it will be logged and Selenium web driver will be exited.
+#Try/Except will run script.  If there is an error it will be printed and Selenium web driver will be exited.
 try:
     main()
     logging.info('COMPLETED')
