@@ -11,10 +11,11 @@ This is a simple Python script that downloads a Business Object Report from Comm
 
 2. **Choose Firefox or Chrome:** Firefox seems more reliable. You will need to edit and uncomment the main Py file to switch to chrome.
    - Webdriver is now handled by webdriver_manager package!
-3. **Python Dependencies:** Quick install - After adding Python to PATH and restarting computer open command prompt and run: `pip install selenium pydrive2 webdriver_manager`
+3. **Python Dependencies:** Quick install - After adding Python to PATH and restarting computer open command prompt and run: `pip install selenium pydrive2 webdriver_manager tenacity`
    - [Selenium](https://github.com/baijum/selenium-python)
    - [PyDrive2](https://github.com/iterative/PyDrive2)
    - [webdriver-manager](https://pypi.org/project/webdriver-manager/)
+   - [Tenacity](https://pypi.org/project/tenacity/)
 
 ## Setup Google Drive API v2 credentials:
 

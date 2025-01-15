@@ -15,6 +15,8 @@ from selenium.webdriver.common.keys import Keys
 from pydrive2.drive import GoogleDrive
 from pathlib import Path
 from webdriver_manager.core.logger import set_logger
+from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type, after
+
 
 #Start Firefox
 from selenium import webdriver
@@ -72,7 +74,7 @@ signIn = dashboardURL + '?authMode=signIn'
 
 #Define global variables
 filename = ""
-default_timeout = 30
+
 
 # Try to load saved client credentials
 def googleAuth():
@@ -94,26 +96,32 @@ def googleAuth():
         gauth.Authorize()
     return GoogleDrive(gauth)
 
-def check_exists(by_strategy, value, timeout=default_timeout):
+def check_exists(by_strategy, value, timeout=5):
     try:
         WebDriverWait(driver, timeout).until(EC.visibility_of_element_located((by_strategy, value)))
         return True
     except (NoSuchElementException, TimeoutException):
         return False
 
-def get_element(by_strategy, value, timeout=default_timeout):
+def get_element(by_strategy, value, timeout=5):
     try:
         return WebDriverWait(driver, timeout).until(EC.element_to_be_clickable((by_strategy, value)))
     except:
         logging.error(f"Unable to find element: {value}")
         quit()
         
-def click_element(by_strategy, value, timeout=default_timeout):
+@retry(
+    stop=stop_after_attempt(3),  # Retry up to 3 times
+    wait=wait_fixed(2),          # Wait 2 seconds between retries
+    retry=retry_if_exception_type(Exception),  # Retry on any exception
+)
+
+def click_element(by_strategy, value, timeout=5):
     try:
         WebDriverWait(driver, timeout).until(EC.element_to_be_clickable((by_strategy, value))).click()
-    except:
-        logging.error(f"Unable to click element: {value}")
-        quit()
+    except Exception as e:
+        logging.error(f"Failed to click element: {value} - {e}")
+        raise  # Reraise the exception to trigger retry
 
 def checkAlerts():
     try:
@@ -133,7 +141,7 @@ def loginTableau():
     driver.get(signIn)
     # Login if not logged in
     time.sleep(2)
-    if check_exists(By.ID, 'email'):
+    if check_exists(By.ID, 'email', 10):
         # Send credentials and login
         get_element(By.ID, 'email').send_keys(tableauUsername)
         get_element(By.ID, 'password').send_keys(tableauPassword)
@@ -178,17 +186,17 @@ def artDownload():
     time.sleep(5)
     driver.switch_to.window(driver.window_handles[-1])
     logging.info(driver.title)
-    iframe = get_element(By.ID, 'launchpadFrame')
+    iframe = get_element(By.ID, 'launchpadFrame', 30)
     driver.switch_to.frame(iframe)
-    subframe = get_element(By.XPATH, "//iframe[@name='servletBridgeIframe']")
+    subframe = get_element(By.XPATH, "//iframe[@name='servletBridgeIframe']", 30)
     driver.switch_to.frame(subframe)
     logging.info('Remove banner if present')    
-    if(check_exists(By.CLASS_NAME,'help4-footer')):
+    if(check_exists(By.CLASS_NAME,'help4-footer', 20)):
         click_element(By.CLASS_NAME, 'help4-close')
     logging.info('Trying to click Inbox...')
-    click_element(By.ID, 'Inbox-title-inner')
+    click_element(By.ID, 'Inbox-title-inner',30)
 
-    check_exists(By.CLASS_NAME, 'sapMLIBActionable')
+    check_exists(By.CLASS_NAME, 'sapMLIBActionable', 30)
     WebDriverWait(driver, 20).until(
         lambda d: next(
             (el for el in d.find_elements(By.CLASS_NAME, 'sapMLIBActionable') if re.match(artFileRegEx, el.text)),
@@ -209,7 +217,7 @@ def artDownload():
     driver.quit()
     sys.exit()
 
-def wait_for_download(filename, timeout=default_timeout):
+def wait_for_download(filename, timeout=30):
     """
     Waits for a fully downloaded, non-zero-byte file in the download directory.
 
@@ -259,32 +267,32 @@ def logoutSp5():
     driver.switch_to.window(driver.window_handles[0])
     click_element(By.ID, 'navigation-link.logout')
     checkAlerts()
+
+@retry(
+    stop=stop_after_attempt(3),  # Retry up to 3 times
+    wait=wait_fixed(2),          # Wait 2 seconds between retries
+    retry=retry_if_exception_type(Exception),  # Retry on any exception
+)   
+def refreshTableau():    # Find and click Refresh Button.  numTimes = number of attempts.
+    try:
+        click_element(By.XPATH, '//button[text()="Request Data Refresh"]')
+        logging.info('Tableau data refresh requested')
+    except:
+        logging.info('No Tableau data refresh button found.  Has it been recently refreshed?  Trying again.')
+        driver.get(dashboardURL)
+        raise
     
-def refreshTableau(numTimes):    # Find and click Refresh Button.  numTimes = number of attempts.
-    i = numTimes
-    while i > 0:
-        if not check_exists(By.XPATH, '//*[@id="root"]/div/header/div/div[2]/div/div/img'):
-            loginTableau()
-        if check_exists(By.XPATH, '//button[text()="Request Data Refresh"]'):
-            click_element(By.XPATH, '//button[text()="Request Data Refresh"]')
-            logging.info('Tableau data refresh requested')
-            i = 0
-        else:
-            i -= 1
-            logging.info('No Tableau data refresh button found.  Has it been recently refreshed?  Trying ' + str(i) + ' more times.')
-            driver.get(dashboardURL)
-            time.sleep(5)
+    
 
 def main():
-    drive = googleAuth()
+    drive = googleAuth() #Make sure Google Auth credentials are ok before downloading report
     sp5Login()
     download = artDownload()
-    getDownload(drive, download) #finds download and uploads to google drive
+    getDownload(drive, download) #finds and downloads report and uploads to google drive
     logoutSp5()
-    loginTableau()
-    refreshTableau(3)# Find and click Refresh Button.  Attempts 3 times.
-    #Close Chrome
-    driver.quit()
+    loginTableau() 
+    refreshTableau() # Find and click Refresh Button.  Attempts 3 times.
+    driver.quit() #Close Browser
 
 #Try/Except will run script.  If there is an error it will be printed and Selenium web driver will be exited.
 try:
