@@ -10,13 +10,13 @@ This is a simple Python script that downloads a Business Object Report from Comm
    (Make sure to add to PATH and restart computer.)
 2. **Choose Firefox or Chrome** Firefox seems more reliable. You will need to edit and uncomment the main Py file to switch to chrome.
    - Webdriver is now handled by webdriver_manager package!
-3. **Python Dependencies** Quick install - After adding Python to PATH and restarting computer open command prompt and run: `pip install playwright pydrive2`
+3. **Python Dependencies** After adding Python to PATH and restarting computer open command prompt and run: `pip install playwright pydrive2` or navigate to this folder and run `pip install -r requirements.txt`
    - [Playwright](https://github.com/baijum/selenium-python)
    - [PyDrive2](https://github.com/iterative/PyDrive2)
-4. **Install Playwright** After installing the pip package for playwright you should be able to run `playwright install` to install the playwright browser binaries
+4. **Install Playwright** After installing the pip package for playwright you should be able to run `playwright install` or just `playwright install chromium` to install the playwright browser binaries
 5. **Setup Drive API** Create a Google Cloud Console project and Service Account per the directions below.
 6. **Clone/Download Repository** Using git cli or the zip download option to get the required files and place them in a folder on your computer or server that will run this script.
-7. **Update Configuration** Update `script.conf` with WSCS URL and credentials, Drive File ID, Tableau Dashboard URL and login credentials, and your filename RegEx.
+7. **Update Configuration** Update `script.conf.sample` and rename to `script.conf` with WSCS URL and credentials, Drive File ID, Tableau Dashboard URL and login credentials, and your filename RegEx.
 8. **Run the script**
 
 ## Setup Google Drive API v2 credentials:
@@ -31,12 +31,12 @@ Drive API is set to use a Service Account for authentication. The service accoun
 6. Click 'Create and Continue' and then click 'Done'. No additional permissions need to be added. You should be returned to a list which has the service account you just created.
 7. Click the service account that you just created and navigate to the 'Keys' tab.
 8. Select 'ADD KEY' and then 'JSON' and the click 'CREATE'.
-9. A .json is file is automatically downloaded. Place the .json file in the folder of this repository.
+9. A .json is file is automatically downloaded. Place the .json file in the folder of this repository and rename it to `service_account.json`.
 10. In your Google Drive where the Tableau dashboard is linked either share the containing folder or the file with the service account email you just created with Editor permissions.
 
 ## Google Drive File ID
 
-To find your Google Drive File ID navigate to the excel file in your Google Drive.  In the URL for the file you will find the File ID which is the combination of numbers and letters found in the url like this: https://docs.google.com/spreadsheets/d/ ***ThisIsTheFileID*** /edit
+To find your Google Drive File ID navigate to the excel file in your Google Drive. In the URL for the file you will find the File ID which is the combination of numbers and letters found in the url like this: https://docs.google.com/spreadsheets/d/ **_ThisIsTheFileID_** /edit
 
 ## Optional Setup
 
