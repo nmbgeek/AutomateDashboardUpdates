@@ -38,6 +38,7 @@ browser = sync_playwright().start().chromium.launch(headless=False)  # Set to Tr
 gauth = GoogleAuth()
 gauth.credentials = ServiceAccountCredentials.from_json_keyfile_name('service_account.json', ["https://www.googleapis.com/auth/drive"])
 drive = GoogleDrive(gauth)
+upload = drive.CreateFile({'id': driveDashboardID})
     
 context = browser.new_context()  # Create a new browser context
 wscs = context.new_page()       # Open a new tab
@@ -59,7 +60,7 @@ try:
     wscs.fill('#formfield-password', temporaryPassword)
     wscs.fill('#formfield-password2', temporaryPassword)
     wscs.click('#LoginView\\.fbtn_submit')
-    wscs.wait_for_load_state('networkidle')
+    wscs.wait_for_load_state('load')
     wscs.wait_for_selector('.pending-requests', state='hidden', timeout=60000)
     wscs.click('.sp5-authpanel .manage-accounts')
     wscs.click('#UserProfilePopup\\.changePassword-button')
@@ -70,19 +71,22 @@ try:
     wscs.click('#UserProfileChangePasswordPopup\\.save-button')
     wscs.click('UserProfilePopup\\.exit-button')
     wscs.wait_for_selector('.popupContent', state='hidden', timeout=5000)
-    wscs.wait_for_load_state('networkidle')
+    wscs.wait_for_load_state('load')
       
       
 
 except:
   wscs.wait_for_selector('.pending-requests', state='hidden', timeout=60000)
-  wscs.wait_for_load_state('networkidle')
+  wscs.wait_for_load_state('load')
 
 with context.expect_page() as bo_page:
   wscs.click('.query-business-object-icon')
   
 sapbo_page = bo_page.value
-sapbo = sapbo_page.frame_locator('#launchpadFrame').frame_locator('//iframe[@name="servletBridgeIframe"]')
+sapbo_page.wait_for_load_state('load')
+sapbo_page.wait_for_selector('#launchpadFrame')
+outer_frame = sapbo_page.frame_locator('#launchpadFrame')
+sapbo = outer_frame.frame_locator('//iframe[@name="servletBridgeIframe"]')
 
 try:
   sapbo.locator('.help4-footer .help4-close').click()
@@ -90,7 +94,12 @@ except Exception as e:
   print(e)
   pass
 sapbo.locator('#Inbox-title-inner').click()
+sapbo_page.wait_for_load_state('networkidle', timeout=60000)
 reports = sapbo.locator('.sapMLIBActionable').element_handles()
+if len(reports) == 0:
+  logging.error('No reports found')
+  browser.close()
+  sys.exit(1)
 for rnum, report in enumerate(reports):
   #title needs to be the value of the contained class .sapMSLITitle
   title = report.query_selector('.sapMSLITitle').text_content().strip()
@@ -98,7 +107,8 @@ for rnum, report in enumerate(reports):
   if bool(re.match(artFileRegEx, title)):
       logging.info('Match found!')
       report.click()
-      #page.locator( '//ul[@id='__list3-listUl']/li['+ str(rnum+1) +']').click()
+      sapbo_page.wait_for_load_state('networkidle')
+      time.sleep(1)
       with sapbo_page.expect_download() as download_info:
         sapbo.locator('//button//bdi[text()="View"]').click()
       filename = re.sub(r':', '-', title) + '.xlsx'
@@ -116,11 +126,27 @@ tableau.goto(tableauLogin)
 tableau.fill('#email', tableauUsername)
 tableau.fill('#password', tableauPassword)
 tableau.click('#signInButton')
-tableau.wait_for_load_state('networkidle')
-tableau.goto(dashboardURL)
-tableau.wait_for_load_state('networkidle')
-tableau.click('//button[text()="Request Data Refresh"]')
-logging.info('Data Refresh Requested')
-
-# Close the browser
-browser.close()
+tableau.wait_for_url('**/discover')
+i = 2
+while i > 0:
+  try:
+    tableau.goto(dashboardURL)
+    tableau.wait_for_load_state('load')
+    tableau.click('//button[text()="Request Data Refresh"]')
+    tableau.wait_for_load_state('networkidle')
+    logging.info('Data Refresh Requested')
+    i = 0
+    browser.close()
+    sys.exit(0)
+    break
+  except Exception as e:
+    print(e)
+    i -= 1
+    if i == 0:
+      logging.error(f'Refresh Button not found. Exiting...')
+      browser.close()
+      sys.exit(1)
+      break
+    else:
+      logging.info('Refresh Button not found, retrying...')
+      continue

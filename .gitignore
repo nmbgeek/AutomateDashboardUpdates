@@ -1,3 +1,4 @@
 script.conf
 service_account.json
 dashboardupdate.log
+venv/
