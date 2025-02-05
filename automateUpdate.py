@@ -107,7 +107,11 @@ for rnum, report in enumerate(reports):
   if bool(re.match(artFileRegEx, title)):
       logging.info('Match found!')
       report.click()
-      sapbo_page.wait_for_load_state('networkidle')
+      try:
+        sapbo_page.wait_for_load_state('networkidle', timeout=5)
+      except:
+        report.click()
+        continue
       time.sleep(1)
       with sapbo_page.expect_download() as download_info:
         sapbo.locator('//button//bdi[text()="View"]').click()
