@@ -94,7 +94,10 @@ except Exception as e:
   print(e)
   pass
 sapbo.locator('#Inbox-title-inner').click()
-sapbo_page.wait_for_load_state('networkidle', timeout=60000)
+try:
+  sapbo_page.wait_for_load_state('networkidle', timeout=10000)
+except:
+  pass
 reports = sapbo.locator('.sapMLIBActionable').element_handles()
 if len(reports) == 0:
   logging.error('No reports found')
@@ -111,7 +114,7 @@ for rnum, report in enumerate(reports):
         sapbo_page.wait_for_load_state('networkidle', timeout=5)
       except:
         report.click()
-        continue
+        pass
       time.sleep(1)
       with sapbo_page.expect_download() as download_info:
         sapbo.locator('//button//bdi[text()="View"]').click()
