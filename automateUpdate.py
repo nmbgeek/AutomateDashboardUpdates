@@ -1,12 +1,20 @@
-#!python3
-
-#  Import packages
-import time, os, re, configparser
-from selenium import webdriver
-from pydrive2.auth import GoogleAuth
-from selenium.common.exceptions import NoSuchElementException   
-from pydrive2.drive import GoogleDrive
+import time, os, re, configparser, sys, logging, glob
 from pathlib import Path
+from playwright.sync_api import sync_playwright
+from pydrive2.auth import GoogleAuth
+from pydrive2.drive import GoogleDrive
+from oauth2client.service_account import ServiceAccountCredentials
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s]: %(message)s',
+    handlers=[
+        logging.FileHandler('dashboardupdate.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger()
+logging.info('STARTING')
 
 # Define variables (read from script.conf)
 config = configparser.ConfigParser()
@@ -19,180 +27,133 @@ tableauPassword = config['Tableau']['password']
 driveDashboardID = config['Google Drive']['fileID']
 dashboardURL = config['Tableau']['dashboardURL']
 artFileRegEx = config['Google Drive']['fileRegEx']
+downloads_path = str(Path.home() / 'Downloads')
+tableauLogin = dashboardURL + '?authMode=signIn'
 
-options = webdriver.ChromeOptions()
-options.add_argument("start-maximized")
-options.add_experimental_option('excludeSwitches', ['enable-logging'])
 
-#Uncomment this to enable using the default or a custom chrome profile otherwise Selenium will launch a new temporary profile instance.
-#AppDataProfile = str(Path.home()) + "\\AppData\\Local\\Google\\Chrome\\User Data\\ #You can create a custom chrome profile to store credentials in and update its path here.  Note that if Chrome profile instance is already opened Chrome Selenium driver will fail.  May move this to the config file eventually.
-#DefaultProfile = "--user-data-dir=" + AppDataProfile
-#options.add_argument(DefaultProfile) 
+# Start playwright browser
+browser = sync_playwright().start().chromium.launch(headless=False)  # Set to True for headless mode
 
-# Authenticate with Google Drive API
-gauth = GoogleAuth(settings_file='gAuthSettings.yaml')
-
-# Try to load saved client credentials
-gauth.LoadCredentialsFile()
-if gauth.credentials is None:
-    auth_url = gauth.GetAuthUrl() # Create authentication url user needs to visit
-    print ('Please visit ' + auth_url)
-    print ('Enter verification code:')
-    code = input()
-    gauth.Auth(code) # Authorize and build service from the code
-    gauth.SaveCredentialsFile()
-elif gauth.access_token_expired:
-    # Refresh them if expired
-    gauth.Refresh()
-else:
-    # Initialize the saved creds
-    gauth.Authorize()
-
+# Authenticate to Google Drive with Service Account
+gauth = GoogleAuth()
+gauth.credentials = ServiceAccountCredentials.from_json_keyfile_name('service_account.json', ["https://www.googleapis.com/auth/drive"])
 drive = GoogleDrive(gauth)
+upload = drive.CreateFile({'id': driveDashboardID})
+    
+context = browser.new_context()  # Create a new browser context
+wscs = context.new_page()       # Open a new tab
 
-def check_exists_by_xpath(xpath):
-    try:
-        driver.find_element_by_xpath(xpath)
-    except NoSuchElementException:
-        return False
-    return True
+# Navigate to the login page
+wscs.goto(servicePointURL)
 
-def upload_file_to_drive(file_id, local_path):
-    """Overwrites the existing Google drive file."""
-    update_file = drive.CreateFile({'id': file_id})
-    update_file.SetContentFile(local_path)
-    update_file.Upload()
-    print('Uploaded File Name: %s, mimeType: %s' % (update_file['title'], update_file['mimeType']))
+# Fill in the login form
+wscs.fill('#formfield-login', spUsername)
+wscs.fill('#formfield-password', spPassword)
 
-def getDownLoadedFileName(waitTime):
-    driver.execute_script("window.open()")
-    # switch to new tab
-    driver.switch_to.window(driver.window_handles[-1])
-    # navigate to chrome downloads
-    driver.get('chrome://downloads')
-    # define the endTime
-    endTime = time.time()+waitTime
-    while True:
-        try:
-            # get downloaded percentage
-            downloadPercentage = driver.execute_script(
-                "return document.querySelector('downloads-manager').shadowRoot.querySelector('#downloadsList downloads-item').shadowRoot.querySelector('#progress').value")
-            # check if downloadPercentage is 100 (otherwise the script will keep waiting)
-            if downloadPercentage == 100:
-                # return the file name once the download is completed
-                return driver.execute_script("return document.querySelector('downloads-manager').shadowRoot.querySelector('#downloadsList downloads-item').shadowRoot.querySelector('div#content  #file-link').text")
-        except:
-            pass
-        time.sleep(1)
-        if time.time() > endTime:
-            break
+# Click the login button
+wscs.click('#LoginView\\.fbtn_submit')
 
-def loginTableau():
-    if check_exists_by_xpath('//*[@id="root"]/div/header/div/div[2]/div/a[8]/button'):
-        signInButton = driver.find_element_by_xpath('//*[@id="root"]/div/header/div/div[2]/div/a[8]/button')
-        signInButton.click()
-        # Find login fields
-        tUsernameInput = driver.find_element_by_css_selector('#email')
-        tPasswordInput = driver.find_element_by_css_selector('#password')
-        tLoginButton = driver.find_element_by_xpath('/html/body/div[4]/div/div/div/div/form/div[4]/button')
-        # Send credentials and login
-        tUsernameInput.send_keys(tableauUsername)
-        tPasswordInput.send_keys(tableauPassword)
-        tLoginButton.click()
-        time.sleep(3)  
-
-#Try/Except will run script.  If there is an error it will be printed and Selenium web driver will be exited.
 try:
-    driver = webdriver.Chrome(options=options)
-    driver.get(servicePointURL)
+  wscs.wait_for_selector('//*[contains(text(), "Password has expired")]', timeout=500)
+  if wscs.locator('//*[contains(text(), "Password has expired")]').is_visible():
+    temporaryPassword = spPassword + '!'
+    wscs.fill('#formfield-password', temporaryPassword)
+    wscs.fill('#formfield-password2', temporaryPassword)
+    wscs.click('#LoginView\\.fbtn_submit')
+    wscs.wait_for_load_state('load')
+    wscs.wait_for_selector('.pending-requests', state='hidden', timeout=60000)
+    wscs.click('.sp5-authpanel .manage-accounts')
+    wscs.click('#UserProfilePopup\\.changePassword-button')
+    password_inputs = wscs.locator('.gwt-PasswordTextBox')
+    password_inputs.nth(0).fill(temporaryPassword)  # Current password
+    password_inputs.nth(1).fill(spPassword)        # New password
+    password_inputs.nth(2).fill(spPassword)        # Confirm new password
+    wscs.click('#UserProfileChangePasswordPopup\\.save-button')
+    wscs.click('UserProfilePopup\\.exit-button')
+    wscs.wait_for_selector('.popupContent', state='hidden', timeout=5000)
+    wscs.wait_for_load_state('load')
+      
+      
 
-    # Maximium wait time to find elements in seconds (ServicePoint can be slowwww)
-    driver.implicitly_wait(60)
+except:
+  wscs.wait_for_selector('.pending-requests', state='hidden', timeout=60000)
+  wscs.wait_for_load_state('load')
 
-    # Find login fields
-    usernameInput = driver.find_element_by_xpath('//*[@id="formfield-login"]')
-    passwordInput = driver.find_element_by_xpath('//*[@id="formfield-password"]')
-    loginButton = driver.find_element_by_xpath('//*[@id="LoginView.fbtn_submit"]/div')
+with context.expect_page() as bo_page:
+  wscs.click('.query-business-object-icon')
+  
+sapbo_page = bo_page.value
+sapbo_page.wait_for_load_state('load')
+sapbo_page.wait_for_selector('#launchpadFrame')
+outer_frame = sapbo_page.frame_locator('#launchpadFrame')
+sapbo = outer_frame.frame_locator('//iframe[@name="servletBridgeIframe"]')
 
-    # Send credentials and login
-    usernameInput.send_keys(spUsername)
-    passwordInput.send_keys(spPassword)
-    loginButton.click()
-
-    # Wait for page to load.  Could not get "Connect to ART" button to be found and click properly
-    time.sleep(8)
-
-    # Redirect to ART Reports
-    artURL = servicePointURL + '/com.bowmansystems.sp5.core.ServicePoint/index.html#reportsART'
-    driver.get(artURL)
-
-    # Load ART Inbox
-    artInbox = driver.find_element_by_xpath('//*[@id="applicationContentPanel"]/tbody/tr/td/table/tbody/tr[3]/td/table/tbody/tr/td/table/tbody/tr[2]/td/table/tbody/tr[3]/td/table/tbody/tr[2]/td/table/tbody/tr/td/table/tbody/tr[1]/td[1]/div/div[2]/img')
-    artInbox.click()
-    time.sleep(2)
-
-    # View last report information
-    lastReport = driver.find_element_by_xpath('//*[@id="applicationContentPanel"]/tbody/tr/td/table/tbody/tr[3]/td/table/tbody/tr/td/table/tbody/tr[2]/td/table/tbody/tr[3]/td/table/tbody/tr[2]/td/table/tbody/tr/td/table/tbody/tr[2]/td[2]/table/tbody/tr[1]/td[2]/img')
-    lastReport.click()
-    time.sleep(2)
-
-    # Download last report
-    downloadButton = driver.find_element_by_xpath('/html/body/div[5]/div/table/tbody/tr[2]/td[2]/table/tbody/tr[3]/td/table/tbody/tr/td/table/tbody/tr[2]/td/table/tbody/tr/td[1]/div/div')
-    downloadButton.click()
-
-    # Call method to get downloaded file name and store download path
-    DownloadedFileName = getDownLoadedFileName(60)
-    downloads_path = str(Path.home() / "Downloads")
-    fullDownloadPath = os.path.join(downloads_path, DownloadedFileName)
-    print(fullDownloadPath + " has completed downloading.")
-    driver.switch_to.window(driver.window_handles[0])
-
-    # Logout of ServicePoint
-    logOut = driver.find_element_by_xpath('//*[@id="navigation-link.logout"]')
-    logOut.click()
-
-    # Check that file downloaded is the correct one for dashboard
-    if bool(re.match(artFileRegEx, DownloadedFileName)) == False:
-        print('Find name does not match the regex:' + artFileRegEx)
-        print('Quitting!')
-        driver.quit()
-        quit()
-
-    # Update Dashboard File
-    upload_file_to_drive(driveDashboardID, fullDownloadPath)
-
-    #Go to Tableauu
-    driver.get(dashboardURL)
-
-    #Reduce implicit wait time because Tableau is much quicker.
-    driver.implicitly_wait(5)
-    time.sleep(3)
-
-    #Check if logged in and do so if needed.
-    if not check_exists_by_xpath('//*[@id="root"]/div/header/div/div[2]/div/div/img'):
-        loginTableau()
-
-    #Refresh page to reveal data refresh button
-    time.sleep(3)
-
-    # Find and click Refresh Button.  Attempts 3 times.
-    i = 3
-    while i > 0:
-        if check_exists_by_xpath('//*[@id="root"]/div/div[2]/div[3]/div[2]/div[2]/div[2]/button'):
-            tRefreshButton = driver.find_element_by_xpath('//*[@id="root"]/div/div[2]/div[3]/div[2]/div[2]/div[2]/button')
-            tRefreshButton.click()
-            print('Tableau data refresh requested')
-            i = 0
-        else:
-            i -= 1
-            print('No Tableau data refresh button found.  Has it been recently refreshed?  Trying ' + str(i) + ' more times.')
-            driver.refresh()
-            time.sleep(5)
-
-    #Close Chrome
-    driver.quit()
-
+try:
+  sapbo.locator('.help4-footer .help4-close').click()
 except Exception as e:
-    #Print error and exit Selenium Chrome
-    print('A problem has occurred from the Problematic code: ', e)
-    driver.quit()
+  print(e)
+  pass
+sapbo.locator('#Inbox-title-inner').click()
+try:
+  sapbo_page.wait_for_load_state('networkidle', timeout=10000)
+except:
+  pass
+reports = sapbo.locator('.sapMLIBActionable').element_handles()
+if len(reports) == 0:
+  logging.error('No reports found')
+  browser.close()
+  sys.exit(1)
+for rnum, report in enumerate(reports):
+  #title needs to be the value of the contained class .sapMSLITitle
+  title = report.query_selector('.sapMSLITitle').text_content().strip()
+  logging.info(f'Report {rnum + 1} is: {title}')
+  if bool(re.match(artFileRegEx, title)):
+      logging.info('Match found!')
+      report.click()
+      try:
+        sapbo_page.wait_for_load_state('networkidle', timeout=5)
+      except:
+        report.click()
+        pass
+      time.sleep(1)
+      with sapbo_page.expect_download() as download_info:
+        sapbo.locator('//button//bdi[text()="View"]').click()
+      filename = re.sub(r':', '-', title) + '.xlsx'
+      download_info.value.save_as(downloads_path + '/' + filename)
+      logging.info(f'Downloaded {filename}')
+      break
+      
+upload = drive.CreateFile({'id': driveDashboardID})
+upload.SetContentFile(downloads_path + '/' + filename)
+upload.Upload()
+logging.info('Uploaded File Name: %s, mimeType: %s' % (upload['title'], upload['mimeType']))
+
+tableau = context.new_page()
+tableau.goto(tableauLogin)
+tableau.fill('#email', tableauUsername)
+tableau.fill('#password', tableauPassword)
+tableau.click('#signInButton')
+tableau.wait_for_url('**/discover')
+i = 2
+while i > 0:
+  try:
+    tableau.goto(dashboardURL)
+    tableau.wait_for_load_state('load')
+    tableau.click('//button[text()="Request Data Refresh"]')
+    tableau.wait_for_load_state('networkidle')
+    logging.info('Data Refresh Requested')
+    i = 0
+    browser.close()
+    sys.exit(0)
+    break
+  except Exception as e:
+    print(e)
+    i -= 1
+    if i == 0:
+      logging.error(f'Refresh Button not found. Exiting...')
+      browser.close()
+      sys.exit(1)
+      break
+    else:
+      logging.info('Refresh Button not found, retrying...')
+      continue
