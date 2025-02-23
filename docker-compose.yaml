@@ -1,0 +1,15 @@
+services:
+  dashboard-updates:
+    # build: . # Uncomment if you want to build the image from Dockerfile
+    image: nmbgeek/dashboard-updates:latest # Replace with your Docker Hub username and image name
+    container_name: dashboard-updates
+    environment:
+      - TIMEZONE=America/New_York #Timezone by identifier - https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
+      - CRON_SCHEDULE=0 6 * * * # Runs daily at 6 AM. Change as needed.  Helper info https://crontab.guru/
+      #- RUN_AT_STARTUP=true # Uncomment to run the script once at startup and then on the schedule
+    volumes:
+      - ./script.conf:/app/script.conf # Configuration file for the script
+      - ./service_account.json:/app/service_account.json # Google service account credentials
+      - ./downloads:/app/downloads # Optional. Persist downloads Business Objects reports outside the container
+      #- ./automateUpdate.py:/app/automateUpdate.py # The script to run
+    restart: unless-stopped # Ensure it restarts if it stops
