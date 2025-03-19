@@ -17,7 +17,8 @@ This is a simple Python script that downloads a Business Object Report from Comm
 5. **Setup Drive API** Create a Google Cloud Console project and Service Account per the directions below.
 6. **Clone/Download Repository** Using git cli or the zip download option to get the required files and place them in a folder on your computer or server that will run this script.
 7. **Update Configuration** Update `script.conf.sample` and rename to `script.conf` with WSCS URL and credentials, Drive File ID, Tableau Dashboard URL and login credentials, and your filename RegEx.
-8. **Run the script**
+8. **Scheduled Business Objects Report** Create a recurring Business Objects report that runs at a time prior to your scheduled update.  This report will need to be set with the delivery location of "BI Inbox" and Format of "Microosft Excel - Reports" found under the Report Features tab on the Schedule page. 
+9. **Run the script**
 
 ## Setup Google Drive API v2 credentials:
 
