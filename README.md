@@ -12,7 +12,8 @@ This version runs completely headless using a docker container.
 2. **Clone/Download Repository** Using git cli or the zip download option to get the required files and place them in a folder on your computer or server that will run this script.
 3. **Setup Service Account for Google Drive** Create a Google Cloud Console project and Service Account per the directions below. Rename the downloaded file to service_account.json and place it in this directory that you just cloned.
 4. **Update Configuration** Update `script.conf.sample` and rename to `script.conf` with WSCS URL and credentials, Drive File ID, Tableau Dashboard URL and login credentials, and your filename RegEx.
-5. **Run Docker** `docker compose up -d` from the command line in this directory will run the docker. By default the script runs at 6:00AM Eastern. In the docker-compose.yaml these values can be updated.
+5. **Scheduled Business Objects Report** Create a recurring Business Objects report that runs at a time prior to your scheduled update.  This report will need to be set with the delivery location of "BI Inbox" and Format of "Microosft Excel - Reports" found under the Report Features tab on the Schedule page. 
+6. **Run Docker** `docker compose up -d` from the command line in this directory will run the docker. By default the script runs at 6:00AM Eastern. In the docker-compose.yaml these values can be updated.
 
 ## Setup Google Drive API v2 credentials:
 
